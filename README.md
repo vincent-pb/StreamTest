@@ -9,7 +9,8 @@ This demo showcases real-time text streaming from a Go backend to a JavaScript f
   - **WebSocket**: Bidirectional real-time communication
   - **No Streaming**: Traditional request-response with word-by-word display effect
 - **Real AI Integration**: OpenAI GPT-3.5 Turbo for actual AI responses
-- **Comprehensive Timing**: Backend processing time + frontend display time
+- **Comprehensive Timing**: Backend processing time + frontend display time + response time tracking
+- **Response Time Measurement**: Track time from backend receipt to first letter appearance
 - **Modern UI**: Beautiful, responsive interface with animations
 - **Real-time Streaming**: Text appears word by word as it's generated
 - **User Input Handling**: Ask questions and get AI responses in real-time
@@ -150,18 +151,21 @@ OpenAI client initialized successfully
 ### Server-Sent Events (SSE)
 - **Backend**: Streams words as they come from OpenAI
 - **Frontend**: Displays words immediately as received
+- **Response Time**: Measured from backend receipt to first letter display
 - **Timing**: Real-time, no artificial delays
 - **Best for**: Simple one-way streaming
 
 ### WebSocket
 - **Backend**: Streams words as they come from OpenAI
 - **Frontend**: Displays words immediately as received
+- **Response Time**: Measured from backend receipt to first letter display
 - **Timing**: Real-time, no artificial delays
 - **Best for**: Bidirectional communication
 
 ### No Streaming
 - **Backend**: Waits for complete OpenAI response
 - **Frontend**: Displays complete response word-by-word (10ms delay)
+- **Response Time**: Same as backend processing time (no streaming delay)
 - **Timing**: Backend processing + frontend display effect
 - **Best for**: Traditional request-response with visual appeal
 
@@ -169,18 +173,30 @@ OpenAI client initialized successfully
 
 ### What Gets Measured
 
+**Response Time:**
+- Time from backend receiving the question to first letter appearing in frontend
+- Measures true user-perceived latency
+- Includes network transmission time and frontend rendering
+
 **Backend Processing Time:**
 - Question receipt and parsing
 - OpenAI API call
 - Response generation
 - Response preparation
 
-**Frontend Display Time:**
+**Frontend Display Time (No-Stream only):**
 - Word-by-word display effect (10ms per word)
 - Visual rendering time
 - User interaction time
 
 ### Display Format
+**For Stream mode:**
+```
+⏱️ Response completed in 2.34 seconds
+⚡ First letter appeared in 1.12 seconds
+```
+
+**For No-Stream mode (detailed breakdown):**
 ```
 ⏱️ Timing Breakdown:
 • Backend processing: 2.34s
@@ -222,6 +238,8 @@ OpenAI client initialized successfully
 **AI SSE Handler:**
 ```go
 func handleAISSE(w http.ResponseWriter, r *http.Request) {
+    startTime := time.Now()
+    
     // Parse user question
     var userQuestion UserQuestion
     json.NewDecoder(r.Body).Decode(&userQuestion)
@@ -237,10 +255,20 @@ func handleAISSE(w http.ResponseWriter, r *http.Request) {
     
     // Stream response word by word
     stream, _ := openaiClient.CreateChatCompletionStream(ctx, req)
+    firstContentTime := time.Time{}
+    
     for {
         response, _ := stream.Recv()
         content := response.Choices[0].Delta.Content
         if content != "" {
+            // Track first content received for response time
+            if firstContentTime.IsZero() {
+                firstContentTime = time.Now()
+                responseTime := firstContentTime.Sub(startTime).Seconds()
+                fmt.Fprintf(w, "data: [RESPONSE_TIME] %.2f\n\n", responseTime)
+                w.(http.Flusher).Flush()
+            }
+            
             fmt.Fprintf(w, "data: %s\n\n", content)
             w.(http.Flusher).Flush()
         }
@@ -268,15 +296,47 @@ func handleAINoStream(w http.ResponseWriter, r *http.Request) {
     // Calculate timing
     duration := time.Since(startTime)
     
-    // Return complete response with timing
+    // Return complete response with timing and response time
     json.NewEncoder(w).Encode(map[string]interface{}{
-        "response": resp.Choices[0].Message.Content,
-        "timing":   duration.Seconds(),
+        "response":      resp.Choices[0].Message.Content,
+        "timing":        duration.Seconds(),
+        "response_time": duration.Seconds(), // Same as timing for No-Stream
     })
 }
 ```
 
 ### Frontend (JavaScript)
+
+**Response Time Tracking:**
+```javascript
+async sendQuestion() {
+    // Start response time tracking
+    this.responseStartTime = performance.now();
+    this.firstLetterReceived = false;
+    this.responseTime = null;
+    
+    // Send question based on protocol...
+}
+
+// Track first letter received in SSE
+if (!this.firstLetterReceived && data.trim() !== '') {
+    this.firstLetterReceived = true;
+    const responseTime = (performance.now() - this.responseStartTime) / 1000;
+    this.responseTime = responseTime;
+}
+
+// Display timing with response time
+showTiming(timing) {
+    let timingText = `⏱️ Response completed in ${timing.toFixed(2)} seconds`;
+    
+    // Add response time if available
+    if (this.responseTime) {
+        timingText += `<br>⚡ First letter appeared in ${this.responseTime.toFixed(2)} seconds`;
+    }
+    
+    timingDiv.innerHTML = timingText;
+}
+```
 
 **No-Stream Word-by-Word Display:**
 ```javascript
@@ -315,10 +375,11 @@ This pattern is ideal for:
 
 1. **Better UX**: Users see responses immediately instead of waiting
 2. **Protocol Flexibility**: Choose the best method for your use case
-3. **Performance Insights**: Detailed timing breakdown
+3. **Performance Insights**: Detailed timing breakdown including response time
 4. **Real AI Integration**: Actual OpenAI GPT-3.5 Turbo responses
 5. **Error Resilience**: Graceful handling of connection issues
 6. **Visual Appeal**: Smooth word-by-word display effects
+7. **Response Time Tracking**: Measure true user-perceived latency
 
 ## 🌐 Browser Support
 
@@ -337,6 +398,7 @@ This pattern is ideal for:
 - Implement proper error handling for API failures
 - Add conversation history and context management
 - Consider using different AI models based on use case
+- Monitor response times for performance optimization
 
 ## 📚 Learning Resources
 
@@ -348,4 +410,4 @@ This pattern is ideal for:
 
 ---
 
-**Happy AI streaming! 🚀🤖** 
+**Happy AI streaming! 🚀🤖**
