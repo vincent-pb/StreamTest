@@ -5,6 +5,7 @@ class AIAgentDemo {
         this.websocket = null;
         this.isConnected = false;
         this.currentResponseElement = null;
+        this.responseTime = null;
         
         this.initializeElements();
         this.bindEvents();
@@ -111,6 +112,11 @@ class AIAgentDemo {
         // Add streaming indicator
         this.addStreamingIndicator();
         
+        // Start response time tracking
+        this.responseStartTime = performance.now();
+        this.firstLetterReceived = false;
+        this.responseTime = null;
+        
         // Send question based on protocol
         if (this.currentProtocol === 'sse') {
             this.sendQuestionSSE(question);
@@ -162,7 +168,16 @@ class AIAgentDemo {
                         } else if (data.startsWith('[TIMING]')) {
                             const timing = data.slice(9);
                             this.showTiming(parseFloat(timing));
+                        } else if (data.startsWith('[RESPONSE_TIME]')) {
+                            const responseTime = data.slice(15);
+                            this.responseTime = parseFloat(responseTime);
                         } else {
+                            // Track first letter received
+                            if (!this.firstLetterReceived && data.trim() !== '') {
+                                this.firstLetterReceived = true;
+                                const responseTime = (performance.now() - this.responseStartTime) / 1000;
+                                this.responseTime = responseTime;
+                            }
                             this.appendToResponse(data);
                         }
                     }
@@ -220,6 +235,10 @@ class AIAgentDemo {
             
             // Display the complete response word by word with typing effect
             if (this.currentResponseElement && data.response) {
+                // Store response time if provided by backend
+                if (data.response_time) {
+                    this.responseTime = parseFloat(data.response_time);
+                }
                 this.displayResponseWordByWord(data.response, data.timing);
             }
             
@@ -248,6 +267,13 @@ class AIAgentDemo {
         // Function to add next word
         const addNextWord = () => {
             if (currentIndex < words.length && this.currentResponseElement) {
+                // Track first letter received
+                if (!this.firstLetterReceived && words[currentIndex].trim() !== '') {
+                    this.firstLetterReceived = true;
+                    const responseTime = (performance.now() - this.responseStartTime) / 1000;
+                    this.responseTime = responseTime;
+                }
+                
                 this.currentResponseElement.textContent += words[currentIndex];
                 this.scrollToBottom();
                 currentIndex++;
@@ -320,6 +346,12 @@ class AIAgentDemo {
                     const message = JSON.parse(event.data);
                     
                     if (message.type === 'word') {
+                        // Track first letter received
+                        if (!this.firstLetterReceived && message.content.trim() !== '') {
+                            this.firstLetterReceived = true;
+                            const responseTime = (performance.now() - this.responseStartTime) / 1000;
+                            this.responseTime = responseTime;
+                        }
                         this.appendToResponse(message.content);
                     } else if (message.type === 'end') {
                         this.finishResponse();
@@ -327,6 +359,8 @@ class AIAgentDemo {
                         this.showError(message.error);
                     } else if (message.type === 'timing') {
                         this.showTiming(parseFloat(message.content));
+                    } else if (message.type === 'response_time') {
+                        this.responseTime = parseFloat(message.content);
                     }
                 } catch (error) {
                     console.error('Failed to parse WebSocket message:', error);
@@ -435,12 +469,19 @@ class AIAgentDemo {
                 padding-top: 0.5rem;
             `;
             
+            let timingText = '';
             if (this.currentProtocol === 'nostream') {
-                timingDiv.textContent = `⏱️ Complete response generated in ${timing.toFixed(2)} seconds (No-Stream mode)`;
+                timingText = `⏱️ Complete response generated in ${timing.toFixed(2)} seconds (No-Stream mode)`;
             } else {
-                timingDiv.textContent = `⏱️ Response completed in ${timing.toFixed(2)} seconds`;
+                timingText = `⏱️ Response completed in ${timing.toFixed(2)} seconds`;
             }
             
+            // Add response time if available
+            if (this.responseTime) {
+                timingText += `<br>⚡ First letter appeared in ${this.responseTime.toFixed(2)} seconds`;
+            }
+            
+            timingDiv.innerHTML = timingText;
             this.currentResponseElement.appendChild(timingDiv);
             this.scrollToBottom();
         }

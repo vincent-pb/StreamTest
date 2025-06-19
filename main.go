@@ -215,6 +215,7 @@ func handleAISSE(w http.ResponseWriter, r *http.Request) {
 
 	// Stream the response
 	hasReceivedContent := false
+	firstContentTime := time.Time{}
 	for {
 		response, err := stream.Recv()
 		if err != nil {
@@ -238,6 +239,16 @@ func handleAISSE(w http.ResponseWriter, r *http.Request) {
 			content := response.Choices[0].Delta.Content
 			if content != "" {
 				hasReceivedContent = true
+
+				// Track first content received
+				if firstContentTime.IsZero() {
+					firstContentTime = time.Now()
+					responseTime := firstContentTime.Sub(startTime).Seconds()
+					log.Printf("First content received in %.2f seconds", responseTime)
+					fmt.Fprintf(w, "data: [RESPONSE_TIME] %.2f\n\n", responseTime)
+					w.(http.Flusher).Flush()
+				}
+
 				// Send each word as it comes
 				words := splitIntoWords(content)
 				for _, word := range words {
@@ -338,6 +349,7 @@ func handleAIWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			// Stream the response
 			hasReceivedContent := false
+			firstContentTime := time.Time{}
 			for {
 				response, err := stream.Recv()
 				if err != nil {
@@ -360,6 +372,15 @@ func handleAIWebSocket(w http.ResponseWriter, r *http.Request) {
 					content := response.Choices[0].Delta.Content
 					if content != "" {
 						hasReceivedContent = true
+
+						// Track first content received
+						if firstContentTime.IsZero() {
+							firstContentTime = time.Now()
+							responseTime := firstContentTime.Sub(startTime).Seconds()
+							log.Printf("First content received via WebSocket in %.2f seconds", responseTime)
+							conn.WriteJSON(AIResponse{Type: "response_time", Content: fmt.Sprintf("%.2f", responseTime)})
+						}
+
 						// Send each word as it comes
 						words := splitIntoWords(content)
 						for _, word := range words {
@@ -526,9 +547,10 @@ func handleAINoStream(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare response
 	response := map[string]interface{}{
-		"response": resp.Choices[0].Message.Content,
-		"timing":   durationSeconds,
-		"status":   "success",
+		"response":      resp.Choices[0].Message.Content,
+		"timing":        durationSeconds,
+		"response_time": durationSeconds, // For No-Stream, response time equals total processing time
+		"status":        "success",
 	}
 
 	// Send response
